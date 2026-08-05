@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Globe, Plus } from "lucide-react";
 import TripCard from "./TripCard";
 import styles from "./dashboard.module.css";
+import { Trip } from "@prisma/client";
 
 export default async function DashboardPage() {
   const session = await getServerSession(authOptions);
@@ -51,7 +52,7 @@ export default async function DashboardPage() {
         </div>
       ) : (
         <div className={styles.grid}>
-          {trips.map((trip) => (
+          {trips.map((trip: Trip) => (
             <TripCard key={trip.id} trip={trip} />
           ))}
         </div>
