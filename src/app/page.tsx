@@ -1,66 +1,135 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
+import { motion } from "framer-motion";
+import { Search, UserCheck, Calendar, Compass } from "lucide-react";
 import styles from "./page.module.css";
 
 export default function Home() {
+  const { status } = useSession();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (status === "authenticated") {
+      router.replace("/dashboard");
+    }
+  }, [status, router]);
+
+  if (status === "loading" || status === "authenticated") {
+    return (
+      <div style={{ 
+        display: "flex", 
+        justifyContent: "center", 
+        alignItems: "center", 
+        height: "100vh", 
+        color: "var(--text-secondary)",
+        fontFamily: "sans-serif"
+      }}>
+        Loading...
+      </div>
+    );
+  }
+  // Animation variants for staggered cards
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.2,
+      },
+    },
+  };
+
+  const cardVariants = {
+    hidden: { opacity: 0, y: 30 },
+    visible: {
+      opacity: 1,
+      y: 0,
+      transition: {
+        duration: 0.6,
+        ease: "easeOut" as const,
+      },
+    },
+  };
+
   return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className={styles.intro}>
-          <h1>To get started, edit the page.tsx file.</h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <div className={styles.main}>
+      {/* Background ambient light */}
+      <div className="ambient-light" />
+
+      {/* Hero Section */}
+      <section className={styles.hero}>
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8, ease: "easeOut" }}
+        >
+          <div className={styles.iconWrapper} style={{ margin: "0 auto 1.5rem" }}>
+            <Compass size={28} />
+          </div>
+          <h1 className={styles.headline}>
+            Your AI Travel Companion
+          </h1>
+          <p className={styles.subheading}>
+            Say goodbye to endless browser tabs. Wanderlust AI deploys parallel research agents to find flights, hotels, and local attractions, all refined in real-time by you.
           </p>
-        </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+        </motion.div>
+
+        <motion.div
+          className={styles.ctas}
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.3, duration: 0.5 }}
+        >
+          <Link href="/register" className={styles.primaryCta}>
+            Get Started
+          </Link>
+          <Link href="/plan-trip" className={styles.secondaryCta}>
+            See Demo
+          </Link>
+        </motion.div>
+      </section>
+
+      {/* Features Section */}
+      <motion.section
+        className={styles.featuresGrid}
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+      >
+        <motion.div className={styles.featureCard} variants={cardVariants}>
+          <div className={styles.iconWrapper}>
+            <Search size={24} />
+          </div>
+          <h3 className={styles.featureTitle}>Parallel Research Agents</h3>
+          <p className={styles.featureDesc}>
+            Four specialized agents coordinate to scan web directories for hotels, flight paths, dining hot spots, and sights simultaneously.
+          </p>
+        </motion.div>
+
+        <motion.div className={styles.featureCard} variants={cardVariants}>
+          <div className={styles.iconWrapper}>
+            <UserCheck size={24} />
+          </div>
+          <h3 className={styles.featureTitle}>Human-in-the-Loop Review</h3>
+          <p className={styles.featureDesc}>
+            Approve recommendations or command updates. Feed direct suggestions to the pipeline to dynamically adjust plans.
+          </p>
+        </motion.div>
+
+        <motion.div className={styles.featureCard} variants={cardVariants}>
+          <div className={styles.iconWrapper}>
+            <Calendar size={24} />
+          </div>
+          <h3 className={styles.featureTitle}>Instant Itineraries</h3>
+          <p className={styles.featureDesc}>
+            Synthesize all agent research and preferences into a beautiful vertical chronological roadmap containing travel and budget specifics.
+          </p>
+        </motion.div>
+      </motion.section>
     </div>
   );
 }
