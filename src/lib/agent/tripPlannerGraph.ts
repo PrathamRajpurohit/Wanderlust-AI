@@ -5,12 +5,17 @@ import { IDay } from "./types";
 import { tavilySearch } from "./tools";
 import { z } from "zod";
 
+// ── Model tier config ──────────────────────────────────────────────────────
+// gemini-2.0-flash-lite: fast, high RPM — best for quick worker fallbacks
+// gemini-2.5-flash:      best quality for drafting
+// gemini-2.0-flash:      fallback if 2.5 is rate-limited
+const WORKER_FALLBACK_MODEL = "gemini-2.0-flash-lite";
+const DRAFT_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]; // fallback chain
+
 // Helper to call Gemini as a fallback when Tavily search fails or is empty
 async function callGeminiFallback(prompt: string): Promise<string> {
   try {
-    const model = new ChatGoogleGenerativeAI({
-      model: "gemini-2.5-flash",
-    });
+    const model = new ChatGoogleGenerativeAI({ model: WORKER_FALLBACK_MODEL });
     const res = await model.invoke(prompt);
     return typeof res.content === "string" ? res.content : JSON.stringify(res.content);
   } catch (error) {
@@ -169,7 +174,7 @@ function sleep(ms: number): Promise<void> {
 
 // ── Draft Agent Node ───────────────────────────────────────────────────────
 async function draftAgent(state: typeof TripStateAnnotation.State) {
-  const logStart = `[draftAgent] Synthesizing itinerary with Gemini 2.5 Flash...`;
+  const logStart = `[draftAgent] Synthesizing itinerary with Gemini...`;
 
   const systemPrompt = "You are a professional travel planner. Generate a highly structured day-by-day travel itinerary for the destination based on the provided research. Return ONLY JSON matching the requested schema. Ensure the sum of dailyEstimates is strictly within the user's budget.";
   const userPrompt = `
@@ -192,18 +197,21 @@ Instructions:
 3. In mapRecommendation, include map locations for all the spots visited on that day (including the hotel, attractions, and restaurants). Provide realistic latitudes (lat) and longitudes (lng) coordinates in the city of ${state.destination}.
 `.trim();
 
-  const MAX_RETRIES = 3;
+  const MAX_RETRIES = 5;
   const logs: string[] = [logStart];
-
-  const model = new ChatGoogleGenerativeAI({ model: "gemini-2.5-flash" });
-  const structuredModel = model.withStructuredOutput(itinerarySchema);
+  let modelIndex = 0;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const modelName = DRAFT_MODELS[modelIndex] ?? DRAFT_MODELS[0];
     try {
       if (attempt > 1) {
-        logs.push(`[draftAgent] Retry attempt ${attempt}/${MAX_RETRIES}...`);
+        logs.push(`[draftAgent] Retry attempt ${attempt}/${MAX_RETRIES} using ${modelName}...`);
+      } else {
+        logs.push(`[draftAgent] Using model: ${modelName}`);
       }
 
+      const model = new ChatGoogleGenerativeAI({ model: modelName });
+      const structuredModel = model.withStructuredOutput(itinerarySchema);
       const response = await structuredModel.invoke([
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
@@ -241,28 +249,37 @@ Instructions:
         return day;
       });
 
-      logs.push(`[draftAgent] Done ✓ — ${draft.length} days generated successfully.`);
+      logs.push(`[draftAgent] Done ✓ — ${draft.length} days generated via ${modelName}.`);
       return { draft, humanFeedback: undefined, logs };
 
     } catch (error: any) {
-      const is429 = error?.status === 429 || String(error?.message).includes("429") || String(error?.message).includes("Too Many Requests");
+      const errStr = String(error?.message || error);
+      const is429 = error?.status === 429 || errStr.includes("429") || errStr.includes("Too Many Requests") || errStr.includes("quota");
 
       if (is429 && attempt < MAX_RETRIES) {
-        // Parse suggested retry delay from the error (e.g. "retryDelay: '33s'"), default to 20s
-        let waitMs = 20000;
-        const delayMatch = String(error?.message || "").match(/retryDelay["\s:]+['"]?(\d+)s/);
-        if (delayMatch) waitMs = (parseInt(delayMatch[1]) + 2) * 1000; // add 2s buffer
+        // Try the next model in the fallback chain first (no wait), then wait before same model retry
+        if (modelIndex < DRAFT_MODELS.length - 1) {
+          modelIndex++;
+          logs.push(`[draftAgent] Rate limited on ${modelName} — switching to ${DRAFT_MODELS[modelIndex]}...`);
+          console.warn(`[draftAgent] 429 on ${modelName}, switching to ${DRAFT_MODELS[modelIndex]}`);
+          continue; // immediately retry with next model
+        }
+
+        // All models tried, parse wait time from error and sleep
+        let waitMs = 15000;
+        const delayMatch = errStr.match(/retryDelay["\s:]+['"]?(\d+)s/);
+        if (delayMatch) waitMs = (parseInt(delayMatch[1]) + 3) * 1000;
 
         const waitSec = Math.round(waitMs / 1000);
-        logs.push(`[draftAgent] Rate limited (429) — waiting ${waitSec}s before retry...`);
-        console.warn(`[draftAgent] 429 rate limit on attempt ${attempt}. Waiting ${waitSec}s...`);
+        logs.push(`[draftAgent] Rate limited on all models — waiting ${waitSec}s before retry...`);
+        console.warn(`[draftAgent] All models rate-limited. Waiting ${waitSec}s...`);
+        modelIndex = 0; // reset to primary model after wait
         await sleep(waitMs);
         continue;
       }
 
-      // Non-429 error or last retry — give up
       console.error("draftAgent error:", error);
-      logs.push(`[draftAgent] ERROR: ${error.message || String(error)}`);
+      logs.push(`[draftAgent] ERROR: ${errStr.slice(0, 200)}`);
       return { logs };
     }
   }
