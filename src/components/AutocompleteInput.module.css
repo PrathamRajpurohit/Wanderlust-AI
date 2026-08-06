@@ -111,6 +111,25 @@
   text-align: center;
 }
 
+.label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.inputError {
+  border-color: #f87171 !important;
+  box-shadow: 0 0 6px rgba(248, 113, 113, 0.3);
+}
+
+.fieldError {
+  font-size: 0.78rem;
+  color: #f87171;
+  margin-top: -0.2rem;
+}
+
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
