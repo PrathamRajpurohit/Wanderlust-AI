@@ -52,6 +52,20 @@ export async function POST(req: Request) {
     );
   } catch (error: any) {
     console.error("Registration error:", error);
+
+    // Surface database configuration errors as a clear message
+    if (
+      error?.message?.includes("DATABASE_URL") ||
+      error?.message?.includes("Connection") ||
+      error?.code === "P1001" ||
+      error?.code === "P1003"
+    ) {
+      return NextResponse.json(
+        { error: "Database connection failed. Please contact support." },
+        { status: 503 }
+      );
+    }
+
     return NextResponse.json(
       { error: "An unexpected error occurred" },
       { status: 500 }
