@@ -52,7 +52,7 @@ export default async function DashboardPage() {
         </div>
       ) : (
         <div className={styles.grid}>
-          {trips.map((trip: Trip) => (
+          {trips.map((trip:Trip) => (
             <TripCard key={trip.id} trip={trip} />
           ))}
         </div>
