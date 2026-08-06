@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import { IMapLocation } from "@/lib/agent/types";
 
 interface MapProps {
@@ -11,187 +11,166 @@ interface MapProps {
   zoom: number;
 }
 
-// Track script loading globally
-let googleMapsLoading = false;
-let googleMapsLoaded = false;
+// Leaflet is loaded dynamically so it only runs client-side
+let leafletLoaded = false;
+let leafletLoading = false;
 
-function loadGoogleMapsScript(apiKey: string, onLoad: () => void) {
-  if (googleMapsLoaded) {
+function loadLeaflet(onLoad: () => void) {
+  if (typeof window === "undefined") return;
+
+  if (leafletLoaded) {
     onLoad();
     return;
   }
 
-  if (googleMapsLoading) {
-    const checkInterval = setInterval(() => {
-      if (googleMapsLoaded) {
-        clearInterval(checkInterval);
+  if (leafletLoading) {
+    const check = setInterval(() => {
+      if (leafletLoaded) {
+        clearInterval(check);
         onLoad();
       }
     }, 100);
     return;
   }
 
-  googleMapsLoading = true;
+  leafletLoading = true;
+
+  // Inject Leaflet CSS
+  if (!document.getElementById("leaflet-css")) {
+    const link = document.createElement("link");
+    link.id = "leaflet-css";
+    link.rel = "stylesheet";
+    link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+    document.head.appendChild(link);
+  }
+
+  // Inject Leaflet JS
   const script = document.createElement("script");
-  script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`;
+  script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
   script.async = true;
-  script.defer = true;
   script.onload = () => {
-    googleMapsLoaded = true;
-    googleMapsLoading = false;
+    leafletLoaded = true;
+    leafletLoading = false;
     onLoad();
+  };
+  script.onerror = () => {
+    leafletLoading = false;
   };
   document.head.appendChild(script);
 }
 
+const TYPE_CONFIG: Record<string, { emoji: string; color: string }> = {
+  hotel:      { emoji: "🏨", color: "#ec4899" },
+  restaurant: { emoji: "🍽️", color: "#10b981" },
+  attraction: { emoji: "🎪", color: "#8b5cf6" },
+};
+
 export default function Map({ dayNum, locations, centerLat, centerLng, zoom }: MapProps) {
-  const mapContainerRef = useRef<HTMLDivElement>(null);
-  const [useJsApi, setUseJsApi] = useState(false);
-  const [isJsApiReady, setIsJsApiReady] = useState(false);
-
-  // Check if API key exists in the environment
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<any>(null);
 
   useEffect(() => {
-    if (apiKey) {
-      setUseJsApi(true);
-      loadGoogleMapsScript(apiKey, () => {
-        setIsJsApiReady(true);
-      });
-    }
-  }, [apiKey]);
+    if (!locations || locations.length === 0) return;
 
-  // JS API Map initialization
-  useEffect(() => {
-    if (!useJsApi || !isJsApiReady || !mapContainerRef.current || !locations.length) return;
+    loadLeaflet(() => {
+      const L = (window as any).L;
+      if (!L || !containerRef.current) return;
 
-    const google = (window as any).google;
-    if (!google) return;
-
-    const mapOptions = {
-      center: { lat: centerLat, lng: centerLng },
-      zoom: zoom,
-      styles: [
-        {
-          featureType: "administrative",
-          elementType: "geometry",
-          stylers: [{ visibility: "off" }],
-        },
-      ],
-    };
-
-    const map = new google.maps.Map(mapContainerRef.current, mapOptions);
-
-    // Initialize directions service & renderer
-    const directionsService = new google.maps.DirectionsService();
-    const directionsRenderer = new google.maps.DirectionsRenderer({
-      map: map,
-      suppressMarkers: true, // We will render our own markers
-      polylineOptions: {
-        strokeColor: "#3b82f6",
-        strokeOpacity: 0.8,
-        strokeWeight: 4,
-      },
-    });
-
-    const hotel = locations.find((l) => l.type === "hotel") || locations[0];
-    const others = locations.filter((l) => l !== hotel);
-
-    if (hotel && others.length > 0) {
-      const waypoints = others.slice(0, -1).map((loc) => ({
-        location: new google.maps.LatLng(loc.lat, loc.lng),
-        stopover: true,
-      }));
-
-      const dest = others[others.length - 1];
-
-      directionsService.route(
-        {
-          origin: new google.maps.LatLng(hotel.lat, hotel.lng),
-          destination: new google.maps.LatLng(dest.lat, dest.lng),
-          waypoints: waypoints,
-          travelMode: google.maps.TravelMode.DRIVING,
-        },
-        (response: any, status: string) => {
-          if (status === "OK") {
-            directionsRenderer.setDirections(response);
-          } else {
-            console.warn("Google Maps directions failed:", status);
-          }
-        }
-      );
-    }
-
-    // Place markers
-    const infoWindow = new google.maps.InfoWindow();
-    locations.forEach((loc) => {
-      let emoji = "📍";
-      let color = "#3b82f6";
-      if (loc.type === "hotel") {
-        emoji = "🏨";
-        color = "#ec4899";
-      } else if (loc.type === "restaurant") {
-        emoji = "🍽️";
-        color = "#10b981";
-      } else if (loc.type === "attraction") {
-        emoji = "🎪";
-        color = "#8b5cf6";
+      // Destroy previous map instance if it exists (React strict-mode / remount)
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
       }
 
-      // Render markers with labeled emojis (using OverlayView or simple customized marker label)
-      const marker = new google.maps.Marker({
-        position: { lat: loc.lat, lng: loc.lng },
-        map: map,
-        title: loc.name,
-        // Since custom markers normally require files, we use a simple styled marker
+      const map = L.map(containerRef.current, {
+        center: [centerLat, centerLng],
+        zoom: zoom ?? 13,
+        zoomControl: true,
+        scrollWheelZoom: false,
       });
 
-      marker.addListener("click", () => {
-        infoWindow.setContent(`
-          <div style="font-family: sans-serif; padding: 4px; color: #1e293b;">
-            <div style="font-weight: 700; font-size: 14px;">${emoji} ${loc.name}</div>
-            <div style="font-size: 11px; text-transform: uppercase; font-weight: bold; color: ${color}; margin-top: 2px;">${loc.type}</div>
-            ${loc.address ? `<div style="font-size: 12px; color: #64748b; margin-top: 4px;">${loc.address}</div>` : ""}
+      mapRef.current = map;
+
+      // OpenStreetMap tile layer (completely free, no key needed)
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        maxZoom: 19,
+      }).addTo(map);
+
+      // Draw a polyline connecting all stops in order
+      if (locations.length > 1) {
+        const latlngs = locations.map((loc) => [loc.lat, loc.lng]);
+        L.polyline(latlngs, {
+          color: "#3b82f6",
+          weight: 3,
+          opacity: 0.8,
+          dashArray: "6, 6",
+        }).addTo(map);
+      }
+
+      // Add markers
+      locations.forEach((loc, idx) => {
+        const config = TYPE_CONFIG[loc.type] ?? { emoji: "📍", color: "#3b82f6" };
+
+        const icon = L.divIcon({
+          className: "",
+          html: `
+            <div style="
+              background: ${config.color};
+              border: 2px solid white;
+              border-radius: 50%;
+              width: 32px;
+              height: 32px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 16px;
+              box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+              cursor: pointer;
+            ">${config.emoji}</div>
+          `,
+          iconSize: [32, 32],
+          iconAnchor: [16, 16],
+          popupAnchor: [0, -20],
+        });
+
+        const popup = L.popup({ maxWidth: 220 }).setContent(`
+          <div style="font-family: sans-serif; padding: 2px;">
+            <div style="font-weight: 700; font-size: 14px; color: #1e293b;">${config.emoji} ${loc.name}</div>
+            <div style="font-size: 11px; text-transform: uppercase; font-weight: 700; color: ${config.color}; margin-top: 3px;">${loc.type}</div>
+            ${loc.address ? `<div style="font-size: 11px; color: #64748b; margin-top: 4px;">${loc.address}</div>` : ""}
+            <a
+              href="https://www.openstreetmap.org/?mlat=${loc.lat}&mlon=${loc.lng}&zoom=16"
+              target="_blank"
+              rel="noopener noreferrer"
+              style="display:inline-block;margin-top:6px;font-size:11px;color:#3b82f6;text-decoration:underline;"
+            >Open in Maps ↗</a>
           </div>
         `);
-        infoWindow.open(map, marker);
+
+        L.marker([loc.lat, loc.lng], { icon })
+          .bindPopup(popup)
+          .addTo(map);
       });
+
+      // Fit map to show all markers
+      if (locations.length > 1) {
+        const bounds = L.latLngBounds(locations.map((l) => [l.lat, l.lng]));
+        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+      }
     });
-  }, [useJsApi, isJsApiReady, locations, centerLat, centerLng, zoom]);
 
-  if (useJsApi) {
-    return (
-      <div
-        style={{
-          width: "100%",
-          height: "320px",
-          borderRadius: "12px",
-          overflow: "hidden",
-          border: "1px solid rgba(255,255,255,0.08)",
-          boxShadow: "inset 0 2px 4px 0 rgba(0, 0, 0, 0.06)",
-        }}
-      >
-        {!isJsApiReady && (
-          <div
-            style={{
-              width: "100%",
-              height: "100%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "var(--text-secondary)",
-              background: "#f1f5f9",
-            }}
-          >
-            Loading Google Maps API...
-          </div>
-        )}
-        <div ref={mapContainerRef} style={{ width: "100%", height: "100%" }} />
-      </div>
-    );
-  }
+    // Cleanup on unmount
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locations, centerLat, centerLng, zoom]);
 
-  // Fallback: Embed directions iframe (free, keyless)
   if (!locations || locations.length === 0) {
     return (
       <div
@@ -203,33 +182,14 @@ export default function Map({ dayNum, locations, centerLat, centerLng, zoom }: M
           alignItems: "center",
           justifyContent: "center",
           color: "var(--text-secondary)",
-          background: "#f1f5f9",
+          background: "var(--bg-elevated)",
+          fontSize: "0.875rem",
         }}
       >
         No map locations available for this day.
       </div>
     );
   }
-
-  const hotel = locations.find((l) => l.type === "hotel") || locations[0];
-  const others = locations.filter((l) => l !== hotel);
-
-  const startCoord = `${hotel.lat},${hotel.lng}`;
-  let daddr = "";
-  if (others.length > 0) {
-    const last = others[others.length - 1];
-    const waypoints = others.slice(0, -1);
-    if (waypoints.length > 0) {
-      const waypointsStr = waypoints.map((w) => `${w.lat},${w.lng}`).join("+to:");
-      daddr = `${waypointsStr}+to:${last.lat},${last.lng}`;
-    } else {
-      daddr = `${last.lat},${last.lng}`;
-    }
-  } else {
-    daddr = startCoord;
-  }
-
-  const embedUrl = `https://maps.google.com/maps?saddr=${startCoord}&daddr=${daddr}&t=&z=${zoom}&ie=UTF8&iwloc=&output=embed`;
 
   return (
     <div
@@ -239,21 +199,11 @@ export default function Map({ dayNum, locations, centerLat, centerLng, zoom }: M
         borderRadius: "12px",
         overflow: "hidden",
         border: "1px solid rgba(255,255,255,0.08)",
-        boxShadow: "inset 0 2px 4px 0 rgba(0, 0, 0, 0.06)",
+        boxShadow: "0 4px 16px rgba(0,0,0,0.3)",
         position: "relative",
-        background: "#e5e7eb",
       }}
     >
-      <iframe
-        src={embedUrl}
-        width="100%"
-        height="100%"
-        style={{ border: 0 }}
-        allowFullScreen={false}
-        loading="lazy"
-        referrerPolicy="no-referrer-when-downgrade"
-        title={`Google Maps Route Day ${dayNum}`}
-      />
+      <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
     </div>
   );
 }

@@ -99,7 +99,11 @@ export default function ThinkingAgentUI({ tripParams, onComplete }: Props) {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Unknown error" }));
-        setErrorMsg(err.error || "Failed to start planning session.");
+        const errMsg =
+          res.status === 401
+            ? "You must be signed in to plan a trip. Please log in and try again."
+            : err.error || "Failed to start planning session.";
+        setErrorMsg(errMsg);
         setPhase("error");
         return;
       }
