@@ -81,11 +81,13 @@
   text-align: left;
 }
 
-.item:hover, .itemActive {
+.item:hover,
+.itemActive {
   background: rgba(14, 165, 233, 0.15);
 }
 
-.item:hover .itemName, .itemActive .itemName {
+.item:hover .itemName,
+.itemActive .itemName {
   color: var(--accent-secondary);
 }
 
@@ -131,6 +133,11 @@
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
